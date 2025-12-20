@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>IRS Frontend</title></head>
+<body>
+  <h3>IRS Frontend</h3>
+  <form id="form">
+    Age: <input name="Age" type="number" value="40"><br>
+    BMI: <input name="BMI" type="number" step="0.1" value="25"><br>
+    Glucose: <input name="Glucose" type="number" value="100"><br>
+    Insulin: <input name="Insulin" type="number" value="80"><br>
+    DPF: <input name="DiabetesPedigreeFunction" type="number" step="0.01" value="0.5"><br>
+    <button type="submit">Check</button>
+  </form>
+  <pre id="result"></pre>
+  <script>
+    document.getElementById('form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const payload = Object.fromEntries(form.entries());
+      for (let k in payload) payload[k] = Number(payload[k]);
+      const res = await fetch('http://localhost:8000/predict', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      document.getElementById('result').innerText = JSON.stringify(data, null, 2);
+    });
+  </script>
+</body>
+</html>
