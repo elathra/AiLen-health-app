@@ -1,23 +1,11 @@
 import streamlit as st
 import pandas as pd
 import os
+import plotly.graph_objects as go
+import joblib
 
-try:
-    import plotly.graph_objects as go
-    PLOTLY_OK = True
-except:
-    PLOTLY_OK = False
-
-try:
-    import joblib
-    JOBLIB_OK = True
-except:
-    JOBLIB_OK = False
-
-# Konfigurasi halaman
 st.set_page_config(page_title="AiLen Health Assistant", page_icon="🤖", layout="wide")
 
-# Session state
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'username' not in st.session_state:
@@ -25,10 +13,9 @@ if 'username' not in st.session_state:
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
 
-# Load model
 model, scaler, features = None, None, None
 MODEL_PATH = "models/diabetes_rf.joblib"
-if JOBLIB_OK and os.path.exists(MODEL_PATH):
+if os.path.exists(MODEL_PATH):
     try:
         artifact = joblib.load(MODEL_PATH)
         model = artifact.get("model")
@@ -37,7 +24,6 @@ if JOBLIB_OK and os.path.exists(MODEL_PATH):
     except:
         pass
 
-# Login page
 def login_page():
     st.title("🔐 Login ke AiLen")
     with st.form("login_form"):
@@ -58,13 +44,11 @@ def login_page():
             else:
                 st.error("Isi username dan password.")
 
-# Chatbot response
 def get_bot_resp(height, weight, glucose, fcvc, tue, faf):
     try:
         bmi = weight / ((height / 100) ** 2)
     except:
         bmi = None
-
     if bmi is None:
         cat, reco = "Invalid", "Periksa input tinggi/berat."
     elif bmi < 18.5:
@@ -75,7 +59,6 @@ def get_bot_resp(height, weight, glucose, fcvc, tue, faf):
         cat, reco = "Overweight", "Kurangi kalori, tambah aktivitas sedang."
     else:
         cat, reco = "Obesitas", "Fokus pada defisit kalori dan latihan kardio."
-
     score_txt = "Tidak tersedia"
     if model and scaler and features and bmi is not None:
         try:
@@ -91,7 +74,6 @@ def get_bot_resp(height, weight, glucose, fcvc, tue, faf):
             score_txt = f"{score:.2f}"
         except:
             pass
-
     if bmi is None:
         food, sport = "Periksa input", "Periksa input"
     elif bmi >= 30:
@@ -100,20 +82,17 @@ def get_bot_resp(height, weight, glucose, fcvc, tue, faf):
         food, sport = "Kurangi minuman manis, perbanyak sayur & protein.", "Naik tangga dan stretching ringan."
     else:
         food, sport = "Pertahankan pola makan seimbang.", "Lanjutkan aktivitas rutin seperti yoga/jalan pagi."
-
     lifestyle = []
     if fcvc < 2: lifestyle.append("Tingkatkan porsi sayur.")
     if tue > 8: lifestyle.append("Kurangi waktu gadget.")
     if faf == 0: lifestyle.append("Mulai olahraga ringan.")
     lifestyle_txt = " ".join(lifestyle)
-
     bmi_txt = f"{bmi:.1f}" if bmi is not None else "—"
     return f"BMI {bmi_txt} ({cat}). {reco} Risiko diabetes: {score_txt}. Makanan: {food}. Aktivitas: {sport}. {lifestyle_txt}"
 
-# Gauge BMI
 def draw_gauge(bmi):
-    if not PLOTLY_OK or bmi is None:
-        st.metric("BMI", f"{bmi:.1f}" if bmi else "—")
+    if bmi is None:
+        st.metric("BMI", "—")
         return
     if bmi < 18.5: color = "#33C4FF"
     elif bmi < 25: color = "#2ECC71"
@@ -123,11 +102,7 @@ def draw_gauge(bmi):
                                  gauge={"axis": {"range": [10, 45]}, "bar": {"color": color}}))
     st.plotly_chart(fig, use_container_width=True)
 
-# Pie chart nutrisi
 def draw_macro(label):
-    if not PLOTLY_OK:
-        st.write("Target Nutrisi (Plotly tidak aktif)")
-        return
     if "Obesity" in label:
         values, title = [20, 50, 30], "Low Carb"
     elif "Overweight" in label:
@@ -140,13 +115,12 @@ def draw_macro(label):
     fig.update_layout(title_text=f"Target Nutrisi ({title})")
     st.plotly_chart(fig, use_container_width=True)
 
-# Dashboard
 def dashboard():
     with st.sidebar:
         st.title(f"👤 Hi, {st.session_state['username']}")
         if st.button("Log Out"):
             st.session_state['logged_in'] = False
-            st.experimental_rerun()
+            st.stop()
         st.header("Profil Fisik")
         gender = st.selectbox("Gender", ["Female", "Male"])
         age = st.slider("Umur", 10, 80, 21)
@@ -157,12 +131,10 @@ def dashboard():
         fcvc = st.slider("Makan Sayur (1-3)", 1, 3, 2)
         tue = st.slider("Jam Gadget (0-24)", 0, 24, 5)
         faf = st.slider("Aktivitas/Olahraga (0-3)", 0, 3, 1)
-
     try:
         bmi = weight / ((height / 100) ** 2)
     except:
         bmi = None
-
     st.title("🧬 AiLen Health Dashboard")
     col_left, col_right = st.columns([1, 1.3])
     with col_left:
@@ -180,7 +152,7 @@ def dashboard():
             st.session_state['chat_history'].append({"role": "user", "message": user_input})
             reply = get_bot_resp(height, weight, glucose, fcvc, tue, faf)
             st.session_state['chat_history'].append({"role": "bot", "message": reply})
-            st.experimental_rerun()
+            st.stop()
         with chat_container:
             for chat in st.session_state['chat_history']:
                 if chat["role"] == "user":
@@ -188,7 +160,6 @@ def dashboard():
                 else:
                     st.info(f"🤖 AiLen: {chat['message']}")
 
-# Main
 if st.session_state['logged_in']:
     dashboard()
 else:
