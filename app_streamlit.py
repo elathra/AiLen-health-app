@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import plotly.graph_objects as go
 import joblib
+import numpy as np
 
 st.set_page_config(page_title="AiLen Health Assistant", page_icon="🤖", layout="wide")
 
@@ -14,6 +15,17 @@ if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
 if 'compliance_score' not in st.session_state:
     st.session_state['compliance_score'] = 0
+if 'sidebar_values' not in st.session_state:
+    st.session_state['sidebar_values'] = {
+        "gender": "Female",
+        "age": 21,
+        "height": 170,
+        "weight": 65,
+        "glucose": 100,
+        "fcvc": 2,
+        "tue": 5,
+        "faf": 1
+    }
 
 model, scaler, features = None, None, None
 MODEL_PATH = "models/diabetes_rf.joblib"
@@ -68,9 +80,15 @@ def risk_score(glucose, bmi):
     if model and scaler and features and bmi is not None:
         try:
             data = {
-                "Age": 40, "BMI": bmi, "BloodPressure": 80.0, "Insulin": 80.0,
-                "Glucose": glucose, "DiabetesPedigreeFunction": 0.5,
-                "high_bp": 0, "Gender_Male": 1
+                "Age": 40,
+                "BMI": bmi,
+                "BloodPressure": 80.0,
+                "Insulin": 80.0,
+                "Glucose": glucose,
+                "DiabetesPedigreeFunction": 0.5,
+                "high_bp": 0,
+                "Gender_Male": 1,
+                "family_history_with_overweight": 1 if st.session_state['sidebar_values']["family_history_with_overweight"]=="Yes" else 0
             }
             df = pd.DataFrame([data])
             df_aligned = df.reindex(columns=features, fill_value=0)
@@ -80,6 +98,7 @@ def risk_score(glucose, bmi):
         except:
             pass
     return score_txt
+
 
 def compliance_score(fcvc, tue, faf):
     veg_score = (fcvc - 1) / 2
@@ -94,10 +113,7 @@ def compliance_gauge(score):
         mode="gauge+number",
         value=score,
         title={"text": "Skor Kepatuhan"},
-        gauge={
-            "axis": {"range": [0, 100]},
-            "bar": {"color": color}
-        }
+        gauge={"axis": {"range": [0, 100]}, "bar": {"color": color}}
     ))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -117,10 +133,7 @@ def draw_bmi_gauge(bmi):
         mode="gauge+number",
         value=bmi,
         title={"text": "BMI"},
-        gauge={
-            "axis": {"range": [10, 45]},
-            "bar": {"color": color}
-        }
+        gauge={"axis": {"range": [10, 45]}, "bar": {"color": color}}
     ))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -160,19 +173,44 @@ def dashboard():
         if st.button("Log Out"):
             st.session_state['logged_in'] = False
             st.stop()
+
         st.header("Profil Fisik")
-        gender = st.selectbox("Gender", ["Female", "Male"])
-        age = st.slider("Umur", 10, 80, 21)
-        height = st.number_input("Tinggi (cm)", 100, 250, 170)
-        weight = st.number_input("Berat (kg)", 30, 200, 65)
-        glucose = st.number_input("Glukosa", 50, 300, 100)
+        gender = st.selectbox("Gender", ["Female", "Male"], 
+                              index=0 if st.session_state['sidebar_values']['gender']=="Female" else 1)
+        age = st.slider("Umur", 10, 80, st.session_state['sidebar_values']['age'])
+        height = st.number_input("Tinggi (cm)", 100, 250, st.session_state['sidebar_values']['height'])
+        weight = st.number_input("Berat (kg)", 30, 200, st.session_state['sidebar_values']['weight'])
+        glucose = st.number_input("Glukosa", 50, 300, st.session_state['sidebar_values']['glucose'])
+        family_history = st.radio(
+            "Riwayat Diabetes Turunan + Overweight",
+            ["No", "Yes"],
+            index=0 if st.session_state['sidebar_values'].get("family_history_with_overweight","No")=="No" else 1
+        )
+
         st.subheader("Gaya Hidup")
-        fcvc = st.slider("Makan Sayur (1-3)", 1, 3, 2)
-        tue = st.slider("Jam Gadget (0-24)", 0, 24, 5)
-        faf = st.slider("Aktivitas/Olahraga (0-3)", 0, 3, 1)
-    bmi = compute_bmi(height, weight)
+        fcvc = st.slider("Makan Sayur (1-3)", 1, 3, st.session_state['sidebar_values']['fcvc'])
+        tue = st.slider("Jam Gadget (0-24)", 0, 24, st.session_state['sidebar_values']['tue'])
+        faf = st.slider("Aktivitas/Olahraga (0-3)", 0, 3, st.session_state['sidebar_values']['faf'])
+
+        st.session_state['sidebar_values'] = {
+            "gender": gender,
+            "age": age,
+            "height": height,
+            "weight": weight,
+            "glucose": glucose,
+            "fcvc": fcvc,
+            "tue": tue,
+            "faf": faf,
+            "family_history_with_overweight": family_history
+        }
+
+    bmi = compute_bmi(st.session_state['sidebar_values']['height'], st.session_state['sidebar_values']['weight'])
     cat, reco, _ = bmi_category_and_advice(bmi)
-    st.session_state['compliance_score'] = compliance_score(fcvc, tue, faf)
+    st.session_state['compliance_score'] = compliance_score(
+        st.session_state['sidebar_values']['fcvc'],
+        st.session_state['sidebar_values']['tue'],
+        st.session_state['sidebar_values']['faf']
+    )
 
     st.title("🧬 AiLen Health Dashboard")
     col_top = st.columns([1, 1, 1])
@@ -188,14 +226,17 @@ def dashboard():
         st.subheader("Target Nutrisi")
         draw_macro(cat)
 
+
+def chatbot_tab():
     st.subheader("💬 Chat dengan AiLen")
     chat_container = st.container()
     with st.form(key="chat_form", clear_on_submit=True):
         user_input = st.text_input("Tanya AiLen...")
         send_btn = st.form_submit_button("Kirim")
     if send_btn and user_input:
+        v = st.session_state['sidebar_values']
+        reply = get_bot_resp(v['height'], v['weight'], v['glucose'], v['fcvc'], v['tue'], v['faf'])
         st.session_state['chat_history'].append({"role": "user", "message": user_input})
-        reply = get_bot_resp(height, weight, glucose, fcvc, tue, faf)
         st.session_state['chat_history'].append({"role": "bot", "message": reply})
     with chat_container:
         for chat in st.session_state['chat_history']:
@@ -204,7 +245,53 @@ def dashboard():
             else:
                 st.info(f"🤖 AiLen: {chat['message']}")
 
+def evaluasi_ai():
+    st.header("📊 Evaluasi AI vs Ground Truth")
+    uploaded = st.file_uploader("Upload compare_results.csv", type=["csv"])
+    if uploaded is not None:
+        df = pd.read_csv(uploaded)
+        df["Error"] = df["MyAI"] - df["GroundTruth"]
+        df["AbsError"] = df["Error"].abs()
+        mae = df["AbsError"].mean()
+        rmse = np.sqrt((df["Error"]**2).mean())
+        mape = (df["AbsError"] / df["GroundTruth"].replace(0, np.nan)).mean() * 100
+        accuracy = 100 - mape if np.isfinite(mape) else np.nan
+        speed_avg = df["inference_ms"].mean() if "inference_ms" in df.columns else np.nan
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Akurasi (MAPE)", f"{accuracy:.2f}%")
+        col2.metric("MAE", f"{mae:.3f}")
+        col3.metric("RMSE", f"{rmse:.3f}")
+        col4.metric("Rata-rata kecepatan", f"{speed_avg:.2f} ms" if not np.isnan(speed_avg) else "N/A")
+        fig_line = go.Figure()
+        x = df["Sample"] if "Sample" in df.columns else list(range(len(df)))
+        fig_line.add_trace(go.Scatter(x=x, y=df["GroundTruth"], mode="lines+markers", name="Ground Truth"))
+        fig_line.add_trace(go.Scatter(x=x, y=df["MyAI"], mode="lines+markers", name="My AI"))
+        fig_line.update_layout(title="Prediksi vs Ground Truth", xaxis_title="Sample", yaxis_title="Nilai")
+        st.plotly_chart(fig_line, use_container_width=True)
+        fig_bar = go.Figure()
+        fig_bar.add_trace(go.Bar(x=x, y=df["Error"], name="Error"))
+        fig_bar.update_layout(title="Error Prediksi", xaxis_title="Sample", yaxis_title="Error")
+        st.plotly_chart(fig_bar, use_container_width=True)
+        if "inference_ms" in df.columns:
+            fig_speed = go.Figure()
+            fig_speed.add_trace(go.Scatter(x=x, y=df["inference_ms"], mode="lines+markers", name="Kecepatan (ms)"))
+            fig_speed.update_layout(title="Kecepatan Inference per Sampel", xaxis_title="Sample", yaxis_title="ms")
+            st.plotly_chart(fig_speed, use_container_width=True)
+        st.subheader("📋 Data Ringkas")
+        st.dataframe(df)
+    else:
+        st.info("Upload file compare_results.csv untuk melihat evaluasi.")
+
+def main_app():
+    tabs = st.tabs(["Dashboard", "Chatbot", "Evaluasi AI"])
+    with tabs[0]:
+        dashboard()
+    with tabs[1]:
+        chatbot_tab()
+    with tabs[2]:
+        evaluasi_ai()
+
 if st.session_state['logged_in']:
-    dashboard()
+    main_app()
 else:
     login_page()
