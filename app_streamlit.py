@@ -12,6 +12,8 @@ if 'username' not in st.session_state:
     st.session_state['username'] = ""
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
+if 'compliance_score' not in st.session_state:
+    st.session_state['compliance_score'] = 0
 
 model, scaler, features = None, None, None
 MODEL_PATH = "models/diabetes_rf.joblib"
@@ -44,21 +46,24 @@ def login_page():
             else:
                 st.error("Isi username dan password.")
 
-def get_bot_resp(height, weight, glucose, fcvc, tue, faf):
+def compute_bmi(height, weight):
     try:
-        bmi = weight / ((height / 100) ** 2)
+        return weight / ((height / 100) ** 2)
     except:
-        bmi = None
+        return None
+
+def bmi_category_and_advice(bmi):
     if bmi is None:
-        cat, reco = "Invalid", "Periksa input tinggi/berat."
-    elif bmi < 18.5:
-        cat, reco = "Underweight", "Tambah kalori sehat dan latihan kekuatan otot."
-    elif bmi < 25:
-        cat, reco = "Normal", "Pertahankan pola makan seimbang dan olahraga rutin."
-    elif bmi < 30:
-        cat, reco = "Overweight", "Kurangi kalori, tambah aktivitas sedang."
-    else:
-        cat, reco = "Obesitas", "Fokus pada defisit kalori dan latihan kardio."
+        return "Invalid", "Periksa input tinggi/berat.", ("Periksa input", "Periksa input")
+    if bmi < 18.5:
+        return "Underweight", "Tambah kalori sehat dan latihan kekuatan otot.", ("Tambah porsi protein, sayur, dan karbo kompleks.", "Latihan kekuatan ringan 2–3x/minggu.")
+    if bmi < 25:
+        return "Normal", "Pertahankan pola makan seimbang dan olahraga rutin.", ("Porsi seimbang karbo-protein-sayur.", "Jalan cepat/yoga 3–4x/minggu.")
+    if bmi < 30:
+        return "Overweight", "Kurangi kalori, tambah aktivitas sedang.", ("Kurangi minuman manis dan gorengan.", "Naik tangga, jalan 30 menit/hari.")
+    return "Obesitas", "Fokus pada defisit kalori dan latihan kardio.", ("Ganti nasi putih dengan sumber karbo tinggi serat.", "Kardio ringan 30–40 menit, 4–5x/minggu.")
+
+def risk_score(glucose, bmi):
     score_txt = "Tidak tersedia"
     if model and scaler and features and bmi is not None:
         try:
@@ -74,39 +79,58 @@ def get_bot_resp(height, weight, glucose, fcvc, tue, faf):
             score_txt = f"{score:.2f}"
         except:
             pass
-    if bmi is None:
-        food, sport = "Periksa input", "Periksa input"
-    elif bmi >= 30:
-        food, sport = "Ganti nasi putih dengan nasi merah/ubi, kurangi gorengan.", "Jalan kaki 20–30 menit tiap hari."
-    elif bmi >= 25:
-        food, sport = "Kurangi minuman manis, perbanyak sayur & protein.", "Naik tangga dan stretching ringan."
-    else:
-        food, sport = "Pertahankan pola makan seimbang.", "Lanjutkan aktivitas rutin seperti yoga/jalan pagi."
-    lifestyle = []
-    if fcvc < 2: lifestyle.append("Tingkatkan porsi sayur.")
-    if tue > 8: lifestyle.append("Kurangi waktu gadget.")
-    if faf == 0: lifestyle.append("Mulai olahraga ringan.")
-    lifestyle_txt = " ".join(lifestyle)
-    bmi_txt = f"{bmi:.1f}" if bmi is not None else "—"
-    return f"BMI {bmi_txt} ({cat}). {reco} Risiko diabetes: {score_txt}. Makanan: {food}. Aktivitas: {sport}. {lifestyle_txt}"
+    return score_txt
 
-def draw_gauge(bmi):
+def compliance_score(fcvc, tue, faf):
+    veg_score = (fcvc - 1) / 2
+    gadget_score = max(0, (24 - tue) / 24)
+    activity_score = faf / 3
+    score = (0.4 * veg_score + 0.3 * gadget_score + 0.3 * activity_score) * 100
+    return round(score)
+
+def compliance_gauge(score):
+    color = "#E74C3C" if score < 40 else ("#F1C40F" if score < 70 else "#2ECC71")
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score,
+        title={"text": "Skor Kepatuhan"},
+        gauge={
+            "axis": {"range": [0, 100]},
+            "bar": {"color": color}
+        }
+    ))
+    st.plotly_chart(fig, use_container_width=True)
+
+def draw_bmi_gauge(bmi):
     if bmi is None:
         st.metric("BMI", "—")
         return
-    if bmi < 18.5: color = "#33C4FF"
-    elif bmi < 25: color = "#2ECC71"
-    elif bmi < 30: color = "#F1C40F"
-    else: color = "#E74C3C"
-    fig = go.Figure(go.Indicator(mode="gauge+number", value=bmi, title={"text": "BMI Score"},
-                                 gauge={"axis": {"range": [10, 45]}, "bar": {"color": color}}))
+    if bmi < 18.5:
+        color = "#33C4FF"
+    elif bmi < 25:
+        color = "#2ECC71"
+    elif bmi < 30:
+        color = "#F1C40F"
+    else:
+        color = "#E74C3C"
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=bmi,
+        title={"text": "BMI"},
+        gauge={
+            "axis": {"range": [10, 45]},
+            "bar": {"color": color}
+        }
+    ))
     st.plotly_chart(fig, use_container_width=True)
 
-def draw_macro(label):
-    if "Obesity" in label:
+def draw_macro(cat):
+    if "Obesitas" in cat:
         values, title = [20, 50, 30], "Low Carb"
-    elif "Overweight" in label:
+    elif "Overweight" in cat:
         values, title = [40, 40, 20], "Kurangi Lemak"
+    elif "Underweight" in cat:
+        values, title = [55, 25, 20], "Kalori Naik"
     else:
         values, title = [50, 30, 20], "Diet Normal"
     labels = ["Karbo", "Protein", "Lemak"]
@@ -114,6 +138,21 @@ def draw_macro(label):
     fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.5, marker_colors=colors, sort=False)])
     fig.update_layout(title_text=f"Target Nutrisi ({title})")
     st.plotly_chart(fig, use_container_width=True)
+
+def get_bot_resp(height, weight, glucose, fcvc, tue, faf):
+    bmi = compute_bmi(height, weight)
+    cat, reco, (food, sport) = bmi_category_and_advice(bmi)
+    score_txt = risk_score(glucose, bmi)
+    lifestyle = []
+    if fcvc < 2:
+        lifestyle.append("Tingkatkan porsi sayur.")
+    if tue > 8:
+        lifestyle.append("Kurangi waktu gadget.")
+    if faf == 0:
+        lifestyle.append("Mulai olahraga ringan.")
+    lifestyle_txt = " ".join(lifestyle)
+    bmi_txt = f"{bmi:.1f}" if bmi is not None else "—"
+    return f"BMI {bmi_txt} ({cat}). {reco} Risiko diabetes: {score_txt}. Makanan: {food}. Aktivitas: {sport}. {lifestyle_txt}"
 
 def dashboard():
     with st.sidebar:
@@ -131,34 +170,39 @@ def dashboard():
         fcvc = st.slider("Makan Sayur (1-3)", 1, 3, 2)
         tue = st.slider("Jam Gadget (0-24)", 0, 24, 5)
         faf = st.slider("Aktivitas/Olahraga (0-3)", 0, 3, 1)
-    try:
-        bmi = weight / ((height / 100) ** 2)
-    except:
-        bmi = None
+    bmi = compute_bmi(height, weight)
+    cat, reco, _ = bmi_category_and_advice(bmi)
+    st.session_state['compliance_score'] = compliance_score(fcvc, tue, faf)
+
     st.title("🧬 AiLen Health Dashboard")
-    col_left, col_right = st.columns([1, 1.3])
-    with col_left:
-        st.subheader("📊 Analisis Tubuh")
-        st.info(f"Kategori BMI: {bmi:.1f}" if bmi else "Kategori BMI: —")
-        draw_gauge(bmi)
-        draw_macro("BMI")
-    with col_right:
-        st.subheader("💬 Chat dengan AiLen")
-        chat_container = st.container()
-        with st.form(key="chat_form", clear_on_submit=True):
-            user_input = st.text_input("Tanya AiLen...")
-            send_btn = st.form_submit_button("Kirim")
-        if send_btn and user_input:
-            st.session_state['chat_history'].append({"role": "user", "message": user_input})
-            reply = get_bot_resp(height, weight, glucose, fcvc, tue, faf)
-            st.session_state['chat_history'].append({"role": "bot", "message": reply})
-            st.stop()
-        with chat_container:
-            for chat in st.session_state['chat_history']:
-                if chat["role"] == "user":
-                    st.success(f"👤 Kamu: {chat['message']}")
-                else:
-                    st.info(f"🤖 AiLen: {chat['message']}")
+    col_top = st.columns([1, 1, 1])
+    with col_top[0]:
+        st.subheader("BMI")
+        draw_bmi_gauge(bmi)
+        st.info(f"Kategori BMI: {f'{bmi:.1f}' if bmi is not None else '—'}")
+    with col_top[1]:
+        st.subheader("Skor Kepatuhan")
+        compliance_gauge(st.session_state['compliance_score'])
+        st.info(f"Skor: {st.session_state['compliance_score']}/100")
+    with col_top[2]:
+        st.subheader("Target Nutrisi")
+        draw_macro(cat)
+
+    st.subheader("💬 Chat dengan AiLen")
+    chat_container = st.container()
+    with st.form(key="chat_form", clear_on_submit=True):
+        user_input = st.text_input("Tanya AiLen...")
+        send_btn = st.form_submit_button("Kirim")
+    if send_btn and user_input:
+        st.session_state['chat_history'].append({"role": "user", "message": user_input})
+        reply = get_bot_resp(height, weight, glucose, fcvc, tue, faf)
+        st.session_state['chat_history'].append({"role": "bot", "message": reply})
+    with chat_container:
+        for chat in st.session_state['chat_history']:
+            if chat["role"] == "user":
+                st.success(f"👤 Kamu: {chat['message']}")
+            else:
+                st.info(f"🤖 AiLen: {chat['message']}")
 
 if st.session_state['logged_in']:
     dashboard()
